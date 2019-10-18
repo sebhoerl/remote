@@ -63,6 +63,18 @@ class RunEnvironment:
             time.sleep(interval)
             wait_time += interval
 
+    def clean_assets(self, container_id):
+        raise NotImplementedError()
+
+    def add_asset(self, container_id, remote_path, local_path):
+        raise NotImplementedError()
+
+    def has_asset(self, container_id, remote_path):
+        raise NotImpementedError()
+
+    def get_asset(self, container_id, remote_path):
+        raise NotImplementedError()
+
 class LocalEnvironment(RunEnvironment):
     def __init__(self, runtime_directory):
         self.runtime_directory = runtime_directory
@@ -77,6 +89,9 @@ class LocalEnvironment(RunEnvironment):
 
         if not os.path.exists(self.runtime_directory):
             raise RuntimeError("Local directory does not exist: %s" % runtime_directory)
+
+        if not os.path.exists("%s/__assets" % self.runtime_directory):
+            os.mkdir("%s/__assets" % self.runtime_directory)
 
     def start(self, identifier, command):
         run_path = "%s/%s" % (self.runtime_directory, identifier)
@@ -152,6 +167,36 @@ class LocalEnvironment(RunEnvironment):
         runtime_path = "%s/%s/run" % (self.runtime_directory, identifier)
         return open("%s/%s" % (runtime_path, path), mode)
 
+    def clean_assets(self, container_id):
+        container_path = "%s/__assets/%s" % (self.runtime_directory, container_id)
+
+        if os.path.exists(container_path):
+            shutil.rmtree(container_path)
+
+    def add_asset(self, container_id, remote_path, local_path):
+        container_path = "%s/__assets/%s" % (self.runtime_directory, container_id)
+
+        if not os.path.exists(container_path):
+            os.mkdir(container_path)
+
+        asset_path = "%s/%s" % (container_path, remote_path)
+        directory_path = "/".join(asset_path.split("/")[:-1])
+
+        if not os.path.exists(directory_path):
+            os.makedirs(directory_path)
+
+        shutil.copyfile(local_path, asset_path)
+
+    def has_asset(self, container_id, remote_path):
+        container_path = "%s/__assets/%s" % (self.runtime_directory, container_id)
+        asset_path = "%s/%s" % (container_path, remote_path)
+        return os.path.exists(asset_path)
+
+    def get_asset(self, container_id, remote_path):
+        container_path = "%s/__assets/%s" % (self.runtime_directory, container_id)
+        asset_path = "%s/%s" % (container_path, remote_path)
+        return asset_path
+
 class SSHEnvironment(RunEnvironment):
     def __init__(self, client, runtime_directory):
         self.runtime_directory = runtime_directory
@@ -173,6 +218,11 @@ class SSHEnvironment(RunEnvironment):
             raise RuntimeError("Remote directory does not exist: %s" % self.runtime_directory)
 
         self._recover_state()
+
+        return_code, output, error = self._call(["ls", "%s/__assets" % self.runtime_directory], False)
+
+        if return_code != 0:
+            self._call(["mkdir", "%s/__assets" % self.runtime_directory])
 
     def _recover_state(self):
         return_code, output, error = self._call(["cat", "state.json"], raise_error = False)
@@ -321,6 +371,38 @@ class SSHEnvironment(RunEnvironment):
 
     def get_file(self, path, mode = "r"):
         return self._open(path, cwd = "%s/%s/run" % (self.runtime_directory, identifier))
+
+    def clean_assets(self, container_id):
+        self._call(["rm", "-rf", "__assets/%s" % container_id])
+
+    def add_asset(self, container_id, remote_path, local_path):
+        if self.sftp is None:
+            self.sftp = self.client.open_sftp()
+
+        container_path = "%s/__assets/%s" % (self.runtime_directory, container_id)
+        asset_path = container_path
+        self.sftp.mkdir(asset_path)
+
+        parts = remote_path.split("/")
+
+        for part in parts[:-1]:
+            asset_path = "%s/%s" % (asset_path, part)
+            self.sftp.mkdir(asset_path)
+
+        asset_path = "%s/%s" % (asset_path, parts[-1])
+        self.sftp.put(local_path, asset_path)
+
+    def has_asset(self, container_id, remote_path):
+        return_code, output, error = self._call([
+            "ls", "__assets/%s/%s" % (container_id, remote_path)
+        ], False)
+
+        return return_code == 0
+
+    def get_asset(self, container_id, remote_path):
+        container_path = "%s/__assets/%s" % (self.runtime_directory, container_id)
+        asset_path = "%s/%s" % (container_path, remote_path)
+        return asset_path
 
 class LSFEnvironment(SSHEnvironment):
     def __init__(self, client, runtime_directory):

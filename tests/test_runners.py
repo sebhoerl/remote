@@ -26,6 +26,15 @@ def _test_generic_environment(environment, interval):
     assert environment.get_status("id2") == RunStatus.FAILED
     environment.clean("id2")
 
+    environment.clean_assets("cid1")
+    assert not environment.has_asset("cid1", "path/to/my_remote_asset.txt")
+    environment.add_asset("cid1", "path/to/my_remote_asset.txt", "my_asset.txt")
+    assert environment.has_asset("cid1", "path/to/my_remote_asset.txt")
+
+    environment.start("id3", ["cat", environment.get_asset("cid1", "path/to/my_remote_asset.txt")])
+    assert environment.wait(["id3"], interval = interval)
+    assert environment.get_stdout("id3").read() == b"This is my asset.\n"
+
 def test_local_environment(runtime_directory):
     environment = LocalEnvironment(str(runtime_directory))
     _test_generic_environment(environment, 1e-3)
