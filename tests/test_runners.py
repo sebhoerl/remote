@@ -7,6 +7,8 @@ import pytest
 import time
 import paramiko
 
+test_path = os.path.dirname(os.path.realpath(__file__))
+
 @pytest.fixture()
 def runtime_directory(tmpdir_factory):
     directory = tmpdir_factory.mktemp('test_tmp')
@@ -28,7 +30,7 @@ def _test_generic_environment(environment, interval):
 
     environment.clean_assets("cid1")
     assert not environment.has_asset("cid1", "path/to/my_remote_asset.txt")
-    environment.add_asset("cid1", "path/to/my_remote_asset.txt", "my_asset.txt")
+    environment.add_asset("cid1", "path/to/my_remote_asset.txt", "%s/my_asset.txt" % test_path)
     assert environment.has_asset("cid1", "path/to/my_remote_asset.txt")
 
     environment.start("id3", ["cat", environment.get_asset("cid1", "path/to/my_remote_asset.txt")])
