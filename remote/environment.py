@@ -19,7 +19,7 @@ class RunStatus:
         return not status in [RunStatus.FAILED, RunStatus.STOPPED, RunStatus.FINISHED]
 
 class RunEnvironment:
-    def start(self, identifier, command):
+    def start(self, identifier, commands):
         raise NotImpementedError()
 
     def stop(self, identifier):
@@ -80,6 +80,7 @@ class LocalEnvironment(RunEnvironment):
         self.runtime_directory = runtime_directory
 
         self.processes = {}
+        self.commands = {}
         self.status = {}
 
         self.logger = logging.getLogger("remote.environment.LocalEnvironment")
@@ -93,21 +94,29 @@ class LocalEnvironment(RunEnvironment):
         if not os.path.exists("%s/__assets" % self.runtime_directory):
             os.mkdir("%s/__assets" % self.runtime_directory)
 
-    def start(self, identifier, command):
+    def start(self, identifier, commands):
         run_path = "%s/%s" % (self.runtime_directory, identifier)
         runtime_path = "%s/run" % run_path
 
         os.mkdir(run_path)
         os.mkdir(runtime_path)
 
-        stdout = open("%s/stdout.log" % run_path, "w+")
-        stderr = open("%s/error.log" % run_path, "w+")
-
-        self.processes[identifier] = sp.Popen(command, stdout = stdout, stderr = stderr, cwd = runtime_path)
         self.status[identifier] = RunStatus.STARTED
+        self.commands[identifier] = commands
         self.logger.info("Started run %s" % identifier)
 
-        return True
+        self._next_command(identifier)
+
+    def _next_command(self, identifier):
+        command = self.commands[identifier].pop(0)
+
+        run_path = "%s/%s" % (self.runtime_directory, identifier)
+        runtime_path = "%s/run" % run_path
+
+        stdout = open("%s/stdout.log" % run_path, "a+")
+        stderr = open("%s/error.log" % run_path, "a+")
+
+        self.processes[identifier] = sp.Popen(command, stdout = stdout, stderr = stderr, cwd = runtime_path)
 
     def _ping(self):
         updates = {}
@@ -119,7 +128,10 @@ class LocalEnvironment(RunEnvironment):
 
                 if not return_code is None:
                     if return_code == 0:
-                        updates[identifier] = RunStatus.FINISHED
+                        if len(self.commands[identifier]) > 0:
+                            self._next_command(identifier)
+                        else:
+                            updates[identifier] = RunStatus.FINISHED
                     else:
                         updates[identifier] = RunStatus.FAILED
 
@@ -279,16 +291,22 @@ class SSHEnvironment(RunEnvironment):
 
         return return_code, stdout, stderr
 
-    def start(self, identifier, command):
+    def start(self, identifier, commands):
         # Prepare directory
         self._call(["mkdir", "-p", "%s/run" % identifier])
 
         # Prepare run script
-        command = " ".join(map(self._escape, command))
+        command = "\n".join([
+            " ".join(map(self._escape, command)) + " 1>> ../stdout.log 2>> ../stderr.log"
+            for command in commands
+        ])
         runtime_path = "%s/%s/run" % (self.runtime_directory, identifier)
 
+        self._call(["rm", "../stdout.log"], cwd = runtime_path, raise_error = False)
+        self._call(["rm", "../stderr.log"], cwd = runtime_path, raise_error = False)
+
         self._call([
-            "echo", "%s 1> ../stdout.log 2> ../stderr.log" % command
+            "echo", command
         ], pipe_path = "run.sh", cwd = runtime_path)
 
         self._call([
@@ -408,16 +426,22 @@ class LSFEnvironment(SSHEnvironment):
     def __init__(self, client, runtime_directory):
         SSHEnvironment.__init__(self, client, runtime_directory)
 
-    def start(self, identifier, command):
+    def start(self, identifier, commands):
         # Prepare directory
         self._call(["mkdir", "-p", "%s/run" % identifier])
 
         # Prepare run script
-        command = " ".join(map(self._escape, command))
+        command = "\n".join([
+            " ".join(map(self._escape, command)) + " 1>> ../stdout.log 2>> ../stderr.log"
+            for command in commands
+        ])
         runtime_path = "%s/%s/run" % (self.runtime_directory, identifier)
 
+        self._call(["rm", "../stdout.log"], cwd = runtime_path, raise_error = False)
+        self._call(["rm", "../stderr.log"], cwd = runtime_path, raise_error = False)
+
         self._call([
-            "echo", "%s 1> ../stdout.log 2> ../stderr.log" % command
+            "echo", command
         ], pipe_path = "run.sh", cwd = runtime_path)
 
         self._call([

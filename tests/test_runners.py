@@ -16,26 +16,34 @@ def runtime_directory(tmpdir_factory):
     shutil.rmtree(str(directory))
 
 def _test_generic_environment(environment, interval):
-    environment.start("id1", ["echo", "test message"])
+    environment.start("id1", [["echo", "test message"]])
     assert environment.wait(["id1"], interval = interval)
 
     assert environment.get_stdout("id1").read() == b"test message\n"
     assert environment.get_status("id1") == RunStatus.FINISHED
     environment.clean("id1")
 
-    environment.start("id2", ["sh", "$/54"])
+    environment.start("id2", [["sh", "$/54"]])
     assert environment.wait(["id2"], interval = interval)
     assert environment.get_status("id2") == RunStatus.FAILED
     environment.clean("id2")
+
+    environment.start("id3",[
+        ["echo", "A"], ["echo", "B"]
+    ])
+    assert environment.wait(["id3"], interval = interval)
+    assert environment.get_status("id3") == RunStatus.FINISHED
+    assert environment.get_stdout("id3").read() == b"A\nB\n"
+    environment.clean("id3")
 
     environment.clean_assets("cid1")
     assert not environment.has_asset("cid1", "path/to/my_remote_asset.txt")
     environment.add_asset("cid1", "path/to/my_remote_asset.txt", "%s/my_asset.txt" % test_path)
     assert environment.has_asset("cid1", "path/to/my_remote_asset.txt")
 
-    environment.start("id3", ["cat", environment.get_asset("cid1", "path/to/my_remote_asset.txt")])
-    assert environment.wait(["id3"], interval = interval)
-    assert environment.get_stdout("id3").read() == b"This is my asset.\n"
+    environment.start("id4", [["cat", environment.get_asset("cid1", "path/to/my_remote_asset.txt")]])
+    assert environment.wait(["id4"], interval = interval)
+    assert environment.get_stdout("id4").read() == b"This is my asset.\n"
 
 def test_local_environment(runtime_directory):
     environment = LocalEnvironment(str(runtime_directory))
